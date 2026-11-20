@@ -280,7 +280,7 @@ var iosPlist = template.Must(template.New("ios").Parse(plistHead + `	<key>Minimu
 {{- end}}
 	<key>UIApplicationSceneManifest</key>
 	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key><false/>
+		<key>UIApplicationSupportsMultipleScenes</key>{{if .IOSSupportsMultipleScenes}}<true/>{{else}}<false/>{{end}}
 		<key>UISceneConfigurations</key>
 		<dict>
 			<key>UIWindowSceneSessionRoleApplication</key>

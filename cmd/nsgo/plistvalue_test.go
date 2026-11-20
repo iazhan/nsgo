@@ -111,6 +111,20 @@ func TestIOSMultitaskingDeclaresEveryIPadOrientation(t *testing.T) {
 	}
 }
 
+func TestIOSMultipleScenes(t *testing.T) {
+	for _, test := range []struct {
+		src, want string
+	}{
+		{"name: Sheet\n", "<key>UIApplicationSupportsMultipleScenes</key><false/>"},
+		{"name: Sheet\napple:\n  multiple_scenes: true\n", "<key>UIApplicationSupportsMultipleScenes</key><true/>"},
+	} {
+		plist := iosPlistFor(t, test.src)
+		if !strings.Contains(plist, test.want) {
+			t.Errorf("%q: plist lacks %q:\n%s", test.src, test.want, plist)
+		}
+	}
+}
+
 func TestIOSFullScreenIPadOrientations(t *testing.T) {
 	plist := iosPlistFor(t, "name: Sheet\napple:\n  orientations: [landscape_left, portrait]\n")
 	for _, want := range []string{
@@ -130,6 +144,7 @@ func TestIPadMultitaskingRejections(t *testing.T) {
 		"apple:\n  requires_full_screen: false\n  orientations: [portrait, landscape_left]\n":            "must list all four",
 		"apple:\n  info:\n    UIRequiresFullScreen: false\n":                                             "set apple.requires_full_screen",
 		"apple:\n  info:\n    UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait]\n": "set apple.orientations",
+		"apple:\n  info:\n    UIApplicationSupportsMultipleScenes: true\n":                               "set apple.multiple_scenes",
 	} {
 		var p project
 		if err := yaml.Unmarshal([]byte(src), &p); err != nil {

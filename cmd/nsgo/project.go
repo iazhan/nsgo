@@ -140,6 +140,8 @@ type project struct {
 		Info map[string]any `yaml:"info"`
 		// RequiresFullScreen is the iOS package's UIRequiresFullScreen, true unless set; false lets an iPad run the app in Split View, Slide Over and Stage Manager.
 		RequiresFullScreen *bool `yaml:"requires_full_screen"`
+		// MultipleScenes is the iOS package's UIApplicationSupportsMultipleScenes, false unless set; true lets the system create more than one scene session for the app.
+		MultipleScenes *bool `yaml:"multiple_scenes"`
 		// Orientations are the iPad's UISupportedInterfaceOrientations~ipad, of portrait, portrait_upside_down, landscape_left and landscape_right; all four when RequiresFullScreen is false, which needs them, and undeclared otherwise.
 		Orientations []string `yaml:"orientations"`
 		// AppGroup is the app group an iOS app shares with its widgets,
@@ -599,7 +601,7 @@ func (p *project) validateIPadMultitasking() error {
 	if !p.IOSRequiresFullScreen() && len(p.Apple.Orientations) > 0 && len(p.Apple.Orientations) < len(iosOrientations) {
 		return fmt.Errorf("nsgo.yaml: apple.requires_full_screen is false, so apple.orientations must list all four orientations, as an iPad app that multitasks supports each; leave it out to declare them all")
 	}
-	for _, k := range [][2]string{{"UIRequiresFullScreen", "apple.requires_full_screen"}, {"UISupportedInterfaceOrientations~ipad", "apple.orientations"}} {
+	for _, k := range [][2]string{{"UIRequiresFullScreen", "apple.requires_full_screen"}, {"UISupportedInterfaceOrientations~ipad", "apple.orientations"}, {"UIApplicationSupportsMultipleScenes", "apple.multiple_scenes"}} {
 		if _, ok := p.Apple.Info[k[0]]; ok {
 			return fmt.Errorf("nsgo.yaml: apple.info sets %s, which the iOS package writes; set %s instead", k[0], k[1])
 		}
@@ -610,6 +612,11 @@ func (p *project) validateIPadMultitasking() error {
 // IOSRequiresFullScreen is the iOS package's UIRequiresFullScreen value.
 func (p *project) IOSRequiresFullScreen() bool {
 	return p.Apple.RequiresFullScreen == nil || *p.Apple.RequiresFullScreen
+}
+
+// IOSSupportsMultipleScenes is the iOS package's UIApplicationSupportsMultipleScenes value.
+func (p *project) IOSSupportsMultipleScenes() bool {
+	return p.Apple.MultipleScenes != nil && *p.Apple.MultipleScenes
 }
 
 // IOSHasIPadOrientations says whether the iOS package declares iPad orientations.
