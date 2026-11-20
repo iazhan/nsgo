@@ -158,13 +158,13 @@ func blursByRadius(vs *driver.ViewStyle, glass bool) bool {
 	return color
 }
 
-// borderHost is the layer v's per-side borders go in, above its backdrop and below its children: the glass's own layer, else the tint over the material or blur; zero, v's own layer, without a backdrop.
+// borderHost is the layer v's per-side borders go in, above its backdrop and below its children: the glass's content view, as Liquid Glass draws over its own layer's sublayers, else the tint over the material or blur; zero, v's own layer, without a backdrop.
 func (v *view) borderHost() objc.ID {
 	switch {
 	case v.backdrop == 0:
 		return 0
 	case v.glass:
-		return v.backdrop.Send(selLayer)
+		return v.glassContent.Send(selLayer)
 	case v.tint != 0:
 		return v.tint.Send(selLayer)
 	}
@@ -180,7 +180,7 @@ func (v *view) setBackdrop(vs *driver.ViewStyle) {
 		apple.MoveBorders(v.native.Send(selLayer), 0)
 		if v.backdrop != 0 {
 			v.backdrop.Send(sel("removeFromSuperview"))
-			v.backdrop, v.backdropLayer, v.tint = 0, 0, 0
+			v.backdrop, v.backdropLayer, v.tint, v.glassContent = 0, 0, 0, 0
 			v.tintColor, v.tintStyled = 0, false
 		}
 		if !want {
@@ -214,6 +214,12 @@ func (v *view) setBackdrop(vs *driver.ViewStyle) {
 		v.surface.keepGlassActive()
 		v.backdrop.Send(sel("setStyle:"), int(vs.Glass)-1)
 		v.backdrop.Send(sel("setCornerRadius:"), float64(max(vs.CornerRadius, vs.Corners.TopLeft)))
+		if v.glassContent == 0 {
+			// Glass draws over its own layer's sublayers but under its content view.
+			v.glassContent = newBorderHost(v.backdrop)
+			v.backdrop.Send(sel("setContentView:"), v.glassContent)
+			v.glassContent.Send(selRelease)
+		}
 		apple.MoveBorders(v.native.Send(selLayer), v.borderHost())
 		return
 	}
@@ -227,13 +233,19 @@ func (v *view) setBackdrop(vs *driver.ViewStyle) {
 	}
 	v.fitBackdrop(vs)
 	if v.tint == 0 {
-		v.tint = objc.ID(apple.Class("NSView")).Send(selAlloc).Send(sel("initWithFrame:"), objc.Send[apple.CGRect](v.backdrop, selBounds))
-		v.tint.Send(selSetAutoresizingMask, widthHeightSizable)
-		v.tint.Send(sel("setWantsLayer:"), true)
+		v.tint = newBorderHost(v.backdrop)
 		v.backdrop.Send(sel("addSubview:"), v.tint)
 		v.tint.Send(selRelease)
 	}
 	apple.MoveBorders(v.native.Send(selLayer), v.borderHost())
+}
+
+// newBorderHost returns a layer-backed view filling backdrop that the mouse goes through, with the same coordinate orientation as NSGo's views.
+func newBorderHost(backdrop objc.ID) objc.ID {
+	host := objc.ID(classOverlay).Send(selAlloc).Send(sel("initWithFrame:"), objc.Send[apple.CGRect](backdrop, selBounds))
+	host.Send(selSetAutoresizingMask, widthHeightSizable)
+	host.Send(sel("setWantsLayer:"), true)
+	return host
 }
 
 // styleTint draws the background above the blur, with the same transition and presentation-value retargeting as the view's own layer. Only color changes touch it, so frames moving other properties leave a tint's transition alone. A background binding takes over immediately.

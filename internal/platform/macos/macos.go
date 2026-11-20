@@ -91,7 +91,9 @@ type view struct {
 	// backdrop is the view's backdrop: Liquid Glass when glass, a holder of backdropLayer, a CABackdropLayer drawing the backdrop filters, when gaussian, else an NSVisualEffectView of a material.
 	backdrop, backdropLayer objc.ID
 	// tint is the view's background over its backdrop blur.
-	tint            objc.ID
+	tint objc.ID
+	// glassContent is Liquid Glass's content view, which holds the per-side borders above the glass.
+	glassContent    objc.ID
 	tintColor       driver.Color
 	tintStyled      bool
 	glass, gaussian bool
