@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dop251/goja/ast"
-	"github.com/dop251/goja/file"
-	"github.com/dop251/goja/parser"
+	"github.com/nsgo-dev/goja/ast"
+	"github.com/nsgo-dev/goja/file"
+	"github.com/nsgo-dev/goja/parser"
 )
 
 // The JSX compiler (NSH's jsx.rs). esbuild has no hook between parsing and

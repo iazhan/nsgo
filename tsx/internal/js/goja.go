@@ -10,7 +10,7 @@ import (
 	"reflect"
 	"unsafe"
 
-	"github.com/dop251/goja"
+	"github.com/nsgo-dev/goja"
 )
 
 type (

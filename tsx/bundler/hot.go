@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dop251/goja/ast"
-	"github.com/dop251/goja/parser"
-	"github.com/dop251/goja/token"
 	"github.com/evanw/esbuild/pkg/api"
+	"github.com/nsgo-dev/goja/ast"
+	"github.com/nsgo-dev/goja/parser"
+	"github.com/nsgo-dev/goja/token"
 )
 
 // Hot bundles (NSH's nsh-bundler hot.rs and nsh-js hot.rs): esbuild's

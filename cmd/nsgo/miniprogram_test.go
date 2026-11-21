@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/andybalholm/brotli"
-	"github.com/dop251/goja"
+	"github.com/nsgo-dev/goja"
 )
 
 func TestOpenMiniProgramRefreshesWeChatProject(t *testing.T) {

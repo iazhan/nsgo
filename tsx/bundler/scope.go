@@ -1,8 +1,8 @@
 package bundler
 
 import (
-	"github.com/dop251/goja/ast"
-	"github.com/dop251/goja/token"
+	"github.com/nsgo-dev/goja/ast"
+	"github.com/nsgo-dev/goja/token"
 )
 
 // The bindings of a module, enough to resolve tags and refs as NSH's

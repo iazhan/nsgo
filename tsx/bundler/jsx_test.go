@@ -5,7 +5,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dop251/goja"
+	"github.com/nsgo-dev/goja"
 )
 
 // The tests of NSH's compiler (nsh-bundler's jsx.rs), on this one's

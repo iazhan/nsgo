@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dop251/goja"
+	"github.com/nsgo-dev/goja"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/nsgo-dev/nsgo/core"

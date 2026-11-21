@@ -3,7 +3,7 @@ package bundler
 import (
 	"reflect"
 
-	"github.com/dop251/goja/ast"
+	"github.com/nsgo-dev/goja/ast"
 )
 
 var nodeType = reflect.TypeFor[ast.Node]()

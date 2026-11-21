@@ -26,7 +26,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/dop251/goja"
+	"github.com/nsgo-dev/goja"
 
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/internal/driver"
