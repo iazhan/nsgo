@@ -228,7 +228,7 @@ func (s *selection) handleColor() objc.ID {
 // the menu comes back as it lifts. Dragged past the other end, the ends
 // swap, and so do the handles.
 func selectHandle(_ objc.ID, _ objc.SEL, r objc.ID) {
-	sl := runner.selecting
+	sl := selectingAt(r.Send(selView))
 	if sl == nil {
 		return
 	}
@@ -313,8 +313,8 @@ func registerSelection() {
 			return onHandle(r.Send(selView)) && v != 0 && objc.Send[bool](v, sel("isKindOfClass:"), apple.Class("UIScrollView"))
 		}},
 		// The menu keeps clear of the selection.
-		{Cmd: sel("editMenuInteraction:targetRectForConfiguration:"), Fn: func(objc.ID, objc.SEL, objc.ID, objc.ID) apple.CGRect {
-			if sl := runner.selecting; sl != nil {
+		{Cmd: sel("editMenuInteraction:targetRectForConfiguration:"), Fn: func(_ objc.ID, _ objc.SEL, m, _ objc.ID) apple.CGRect {
+			if sl := selectingAt(m.Send(selView)); sl != nil {
 				if r, ok := sl.selectionRect(); ok {
 					return r
 				}
@@ -322,17 +322,27 @@ func registerSelection() {
 			return apple.CGRect{}
 		}},
 		{Cmd: sel("editMenuInteraction:willPresentMenuForConfiguration:animator:"), Fn: func(_ objc.ID, _ objc.SEL, m, _, _ objc.ID) {
-			if sl := runner.selecting; sl != nil && sl.menu == m {
+			if sl := selectingAt(m.Send(selView)); sl != nil && sl.menu == m {
 				sl.shown = true
 			}
 		}},
 		{Cmd: sel("editMenuInteraction:willDismissMenuForConfiguration:animator:"), Fn: func(_ objc.ID, _ objc.SEL, m, _, _ objc.ID) {
-			if sl := runner.selecting; sl != nil && sl.menu == m {
+			if sl := selectingAt(m.Send(selView)); sl != nil && sl.menu == m {
 				sl.shown = false
 			}
 		}},
 	})
 	selector = objc.ID(classSelector).Send(selNew)
+}
+
+// selectingAt is the selection of the surface n shows in, n a view of the surface's, a handle in one or anything inside them: each scene of a standalone app selects in its own.
+func selectingAt(n objc.ID) *selection {
+	for ; n != 0; n = n.Send(selSuperview) {
+		if v := views[n]; v != nil {
+			return v.surface.selecting
+		}
+	}
+	return nil
 }
 
 // isTap reports whether r is an area's tap.
@@ -343,7 +353,7 @@ func isTap(r objc.ID) bool {
 
 // onHandle reports whether n is a handle of the selection or in one.
 func onHandle(n objc.ID) bool {
-	sl := runner.selecting
+	sl := selectingAt(n)
 	if sl == nil || n == 0 {
 		return false
 	}
@@ -358,7 +368,7 @@ func onHandle(n objc.ID) bool {
 // selectShouldBegin begins an area's tap only while it holds a
 // selection, and a handle's drag only while there is one.
 func selectShouldBegin(_ objc.ID, _ objc.SEL, r objc.ID) bool {
-	sl := runner.selecting
+	sl := selectingAt(r.Send(selView))
 	switch {
 	case isTap(r):
 		return sl != nil && sl.area.native == r.Send(selView) && !sl.model.IsEmpty()
@@ -418,7 +428,7 @@ func selectReceives(_ objc.ID, _ objc.SEL, r, touch objc.ID) bool {
 	if onHandle(touch.Send(selView)) {
 		return false
 	}
-	if sl := runner.selecting; sl != nil && isTap(r) {
+	if sl := selectingAt(stop); sl != nil && isTap(r) {
 		sl.shownAtTap = sl.shown
 	}
 	for n := touch.Send(selView); n != 0 && n != stop; n = n.Send(selSuperview) {
@@ -476,7 +486,7 @@ func (s *selection) point(r objc.ID) driver.Point {
 // selectTap answers a tap in the area as a text view does: on the
 // selection it shows or hides the menu, off it it clears the selection.
 func selectTap(_ objc.ID, _ objc.SEL, r objc.ID) {
-	sl := runner.selecting
+	sl := selectingAt(r.Send(selView))
 	if sl == nil || objc.Send[int](r, selState) != stateEnded {
 		return
 	}
@@ -609,8 +619,8 @@ func (s *surface) clearSelection() {
 
 // controllerCopy is the view controller's copy:, which copies the
 // selection.
-func controllerCopy(_ objc.ID, _ objc.SEL, _ objc.ID) {
-	sl := runner.selecting
+func controllerCopy(self objc.ID, _ objc.SEL, _ objc.ID) {
+	sl := controllerSurface(self).selecting
 	if sl == nil || sl.model.IsEmpty() {
 		return
 	}
@@ -621,8 +631,8 @@ func controllerCopy(_ objc.ID, _ objc.SEL, _ objc.ID) {
 
 // controllerSelectAll is the view controller's selectAll:, which selects
 // the area and shows the menu again.
-func controllerSelectAll(_ objc.ID, _ objc.SEL, _ objc.ID) {
-	sl := runner.selecting
+func controllerSelectAll(self objc.ID, _ objc.SEL, _ objc.ID) {
+	sl := controllerSurface(self).selecting
 	if sl == nil {
 		return
 	}
@@ -637,7 +647,8 @@ func controllerSelectAll(_ objc.ID, _ objc.SEL, _ objc.ID) {
 // selection.
 func controllerCanPerform(self objc.ID, cmd objc.SEL, action objc.SEL, sender objc.ID) bool {
 	if action == sel("copy:") || action == sel("selectAll:") {
-		return runner.selecting != nil && !runner.selecting.model.IsEmpty()
+		sl := controllerSurface(self).selecting
+		return sl != nil && !sl.model.IsEmpty()
 	}
 	return apple.SendSuper[bool](self, cmd, action, sender)
 }

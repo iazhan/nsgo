@@ -218,6 +218,18 @@ func (rt *runtime) openSurface(owner *Scope, cfg driver.SurfaceConfig, content f
 	return w
 }
 
+// openScene opens the scene the platform numbers scene, which it connected beyond the app's first, as iPadOS connects one for each window the user opens (EventOpenScene): a tree of its own under the app's scope, so the scenes share the app's signals, showing the main view as the first scene does, the one SetMainView set or else the root view the app runs. It lives until the platform ends it (EventWindowEnded) as the system discards the scene. A platform that opens windows of the app's, where the app opens what it shows, opens none.
+func (rt *runtime) openScene(scene uint32) {
+	if rt.windows != nil {
+		return
+	}
+	content := rt.rootView
+	if rt.mainView != nil {
+		content = rt.showMainView
+	}
+	rt.openSurface(rt.root, driver.SurfaceConfig{Kind: driver.SurfaceScene, Scene: scene}, content)
+}
+
 // gone ends the window as its scope goes: the engine sends its platform
 // WindowDestroy, and the app may end with it.
 func (w *Window) gone() {
@@ -850,6 +862,8 @@ func (t *Tree) surfaceEvent(ev driver.Event) bool {
 		}
 	case driver.EventReopen:
 		t.within(t.root, rt.reopen)
+	case driver.EventOpenScene:
+		rt.openScene(ev.Count)
 	case driver.EventOpenFiles:
 		paths, _ := ev.Data.([]string)
 		t.within(t.root, func() { rt.opens.open(rt, paths) })

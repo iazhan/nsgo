@@ -260,8 +260,8 @@ func (s *surface) preferredFocus() objc.ID {
 // controllerPreferredFocus is where the root view controller asks the
 // focus to go: surface.preferredFocus, else UIKit's choice.
 func controllerPreferredFocus(self objc.ID, cmd objc.SEL) objc.ID {
-	if runner != nil {
-		if v := runner.preferredFocus(); v != 0 {
+	if s := controllerSurface(self); s != nil {
+		if v := s.preferredFocus(); v != 0 {
 			return objc.ID(apple.Class("NSArray")).Send(sel("arrayWithObject:"), v)
 		}
 	}

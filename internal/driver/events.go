@@ -244,7 +244,7 @@ const (
 	EventQuitRequest
 	// EventOverlayPermission answers ItemOverlayPermission Count with the permission as Index.
 	EventOverlayPermission
-	// EventWindowEnded reports that the platform ended the surface's window itself, for the reason Index (OverlayEndDenied, ...), as Android ends an overlay it refuses or removes: the core closes it, and OnClosing has no say.
+	// EventWindowEnded reports that the platform ended the surface's window itself, for the reason Index (OverlayEndDenied, ...), as Android ends an overlay it refuses or removes and iOS a scene the system discards: the core closes it, and OnClosing has no say.
 	EventWindowEnded
 	// EventPermission answers ItemPermission Count, after the kinds Android's Protocol.java mirrors: Index is the permission's status (PermissionNotAsked, ...), and Finished says whether PermissionOpenSettings opened the settings.
 	EventPermission
@@ -272,6 +272,8 @@ const (
 	EventPurchaseUpdate
 	// EventWebCookies answers ItemWebCookies Count, Text why it failed (NoWebCookieStore where the platform has no store) and Data the []WebCookie a WebCookiesList picked.
 	EventWebCookies
+	// EventOpenScene reports that the platform connected a scene beyond the ones the app shows, which it numbers Count, as iPadOS connects one for each window the user opens: the core opens a SurfaceScene showing the main view, whose ItemOpenSurface names Count as its Scene for the platform to attach.
+	EventOpenScene
 )
 
 // EventVideoPause reports that the platform paused video ID, not the app's Paused: Index is why (VideoPauseInterruption, ...). An EventMask has no room for another kind, so it shares EventImageInfo's, an answer that names no view and is never in a mask; Android's Protocol.java mirrors it.

@@ -1,0 +1,4 @@
+# The iOS backend's own test app, which declares multiple scenes so that its tests open more than one on an iPad (scene_test.go).
+name: ios
+apple:
+  multiple_scenes: true

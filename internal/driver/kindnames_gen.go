@@ -220,6 +220,7 @@ var eventKindNames = map[EventKind]string{
 	EventPurchase:              "EventPurchase",
 	EventPurchaseUpdate:        "EventPurchaseUpdate",
 	EventWebCookies:            "EventWebCookies",
+	EventOpenScene:             "EventOpenScene",
 }
 
 // String returns the kind's name, as a log or an event prints it.

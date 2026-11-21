@@ -50,7 +50,10 @@ func takeConnectionActivities(options objc.ID) {
 // scene:continueUserActivity:, as a link opens the running app.
 func sceneContinueActivity(_ objc.ID, _ objc.SEL, _, activity objc.ID) {
 	if takeActivity(activity) {
-		runner.refresh()
+		// Env.OpenedURL is the app's, in every scene.
+		for _, s := range scenes {
+			s.refresh()
+		}
 	}
 }
 

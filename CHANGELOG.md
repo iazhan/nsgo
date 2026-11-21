@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Add `apple.multiple_scenes`, which writes `UIApplicationSupportsMultipleScenes`, and show each further scene an iPad connects for it, as the user opens another window of the app, in a window of its own: a tree of the app's one engine showing the main view, with its own size, safe area, status bar and orientations, kept while UIKit disconnects the scene and ended as the system discards it (#49 by @houko).
 - Keep an iOS app's engine, state and screens when UIKit disconnects its scene and connects a new one while the process lives, showing the running app in the new window rather than starting a second engine over it (#1030 by @houko).
 - Add `WebView.UserAgentSuffix`, and `userAgentSuffix` in TSX, to append to the platform's own user agent or to `UserAgent` on macOS, iOS, Android, Windows and Linux (#114 by @houko).
 - Honor every family in a Windows `FontFamily` list when DirectWrite falls back for missing characters (#668 by @houko).

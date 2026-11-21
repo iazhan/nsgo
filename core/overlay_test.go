@@ -192,3 +192,70 @@ func TestOverlayLifecycle(t *testing.T) {
 		t.Fatalf("with the focus: %v", inside.Lifecycle())
 	}
 }
+
+// TestScenesShowTheMainView opens the scenes a platform connects beyond the app's first, as iPadOS does for each window the user opens: each is a tree of its own showing the main view, the scenes share the app's signals, and the platform ends one as the system discards it.
+func TestScenesShowTheMainView(t *testing.T) {
+	var shared *Signal[string]
+	var built int
+	root := func(cx *Scope) Node {
+		built++
+		return Text{ContentFunc: func() string { return shared.Get() }}
+	}
+	for _, test := range []struct {
+		name string
+		app  func(cx *Scope) Node
+	}{
+		{"root view", func(cx *Scope) Node {
+			if shared == nil {
+				shared = NewSignal(cx, "one")
+			}
+			return root(cx)
+		}},
+		{"main view", AppRoot(func(cx *Scope) {
+			shared = NewSignal(cx, "one")
+			cx.SetMainView(root)
+		})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			shared, built = nil, 0
+			w := newOverlays(t, OSIOS, test.app)
+			w.dispatch(0, driver.Event{Kind: driver.EventOpenScene, Count: 7})
+			opened := w.take(0, driver.ItemOpenSurface)
+			if len(opened) != 1 || opened[0].Surface.Kind != driver.SurfaceScene || opened[0].Surface.Scene != 7 || opened[0].Surface.ID == 0 {
+				t.Fatalf("opened %+v", opened)
+			}
+			id := opened[0].Surface.ID
+			if built != 2 {
+				t.Fatalf("the main view was built %d times, want once a scene", built)
+			}
+			if texts := w.texts(id); len(texts) != 1 || texts[0] != "one" {
+				t.Fatalf("the scene shows %q", texts)
+			}
+			shared.Set("two")
+			w.commit()
+			for _, s := range []uint32{0, id} {
+				if texts := w.texts(s); len(texts) == 0 || texts[len(texts)-1] != "two" {
+					t.Fatalf("surface %d shows %q after the shared signal changed", s, texts)
+				}
+			}
+			w.dispatch(id, driver.Event{Kind: driver.EventWindowEnded})
+			if len(w.take(id, driver.ItemWindow)) != 1 || len(w.app.Surfaces()) != 0 {
+				t.Fatal("ending the scene destroyed no tree")
+			}
+			if texts := w.texts(0); len(texts) == 0 || texts[len(texts)-1] != "two" {
+				t.Fatalf("the first scene shows %q after the other ended", texts)
+			}
+		})
+	}
+}
+
+// TestScenesOpenNoWindowsOnDesktops checks that a platform that opens the app's windows opens no tree for a scene: the app opens what it shows there.
+func TestScenesOpenNoWindowsOnDesktops(t *testing.T) {
+	w := newWindows(t, func(cx *Scope) { cx.SetMainView(func(*Scope) Node { return View{} }) })
+	before := len(w.app.Surfaces())
+	w.take(0, driver.ItemOpenSurface)
+	w.dispatch(0, driver.Event{Kind: driver.EventOpenScene, Count: 1})
+	if len(w.app.Surfaces()) != before || len(w.take(0, driver.ItemOpenSurface)) != 0 {
+		t.Fatal("a scene opened a window where the app opens its own")
+	}
+}

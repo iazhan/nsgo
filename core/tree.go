@@ -755,6 +755,9 @@ func newTree(root *Scope, text driver.TextEngine, id uint32) *Tree {
 
 // Mount builds what app returns as the root view's content.
 func (t *Tree) Mount(app func(cx *Scope) Node) {
+	if t.id == 0 {
+		t.rt.rootView = app
+	}
 	t.within(t.root, func() {
 		t.mount(t.root, t.view, Func(app))
 	})

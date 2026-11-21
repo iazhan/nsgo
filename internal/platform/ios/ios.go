@@ -163,6 +163,11 @@ type surface struct {
 	embed    *embedState
 	stops    []func()
 	closed   bool
+	// A standalone app's scene (sceneWillConnect): window is the UIWindow it shows in, 0 while its scene is disconnected, and controller its root view controller. session is the persistent identifier of the scene session it shows, "" once the system discarded it. scene numbers a scene beyond the first for the tree the engine opens it (EventOpenScene), and tree is that tree's ID once attached; ending says the engine destroyed the tree.
+	window, controller objc.ID
+	session            string
+	scene, tree        uint32
+	discarded, ending  bool
 	// alerts are the alerts shown, by ID, kept for a test host to answer
 	// them.
 	alerts map[uint32]shownAlert
@@ -269,10 +274,11 @@ type edgeInsets struct {
 // views maps native objects to their Go side. Only the main thread uses it.
 var views = map[objc.ID]*view{}
 
-// runner is the surface a standalone app's scene shows (Run); UIKit makes
-// the scene's delegate, so it cannot be handed one. Embedded surfaces are
-// their hosts' views (NewView).
+// runner is the surface a standalone app's first scene shows (Run), the engine's own; UIKit makes the scene's delegate, so it cannot be handed one. Embedded surfaces are their hosts' views (NewView).
 var runner *surface
+
+// scenes are a standalone app's surfaces, one for each scene session it shows, runner first: the windows of one engine, each further scene a tree of its own (driver.SurfaceScene), as a desktop app's windows are.
+var scenes []*surface
 
 var (
 	sel = apple.Sel
@@ -373,11 +379,11 @@ func loadUIKit() {
 	)
 	classSurface = register("NsgoSurface", uiView, nil, surfaceMethods)
 	classController = register("NsgoViewController", apple.Class("UIViewController"), nil, []objc.MethodDef{
-		{Cmd: sel("preferredStatusBarStyle"), Fn: func(objc.ID, objc.SEL) int { return runner.statusBar }},
-		{Cmd: sel("prefersStatusBarHidden"), Fn: func(objc.ID, objc.SEL) bool { return runner.hideBar }},
-		{Cmd: sel("preferredStatusBarUpdateAnimation"), Fn: func(objc.ID, objc.SEL) int { return runner.barAnimation() }},
+		{Cmd: sel("preferredStatusBarStyle"), Fn: func(self objc.ID, _ objc.SEL) int { return controllerSurface(self).statusBar }},
+		{Cmd: sel("prefersStatusBarHidden"), Fn: func(self objc.ID, _ objc.SEL) bool { return controllerSurface(self).hideBar }},
+		{Cmd: sel("preferredStatusBarUpdateAnimation"), Fn: func(self objc.ID, _ objc.SEL) int { return controllerSurface(self).barAnimation() }},
 		{Cmd: sel("supportedInterfaceOrientations"), Fn: func(self objc.ID, cmd objc.SEL) uint {
-			if m := runner.orientations(); m != 0 {
+			if m := controllerSurface(self).orientations(); m != 0 {
 				return m
 			}
 			return apple.SendSuper[uint](self, cmd)
@@ -422,6 +428,9 @@ func loadUIKit() {
 					runner.engine.Close()
 				}
 				engine.SyncStorage()
+			}},
+			{Cmd: sel("application:didDiscardSceneSessions:"), Fn: func(self objc.ID, _ objc.SEL, application, sessions objc.ID) {
+				apple.ForEach(sessions, func(session objc.ID) { discardScene(sessionID(session)) })
 			}}})
 	// The SDK requires the scene life cycle; Info.plist names this class.
 	register("NsgoSceneDelegate", apple.Class("UIResponder"),
@@ -458,6 +467,7 @@ type Options struct {
 func Run(root engine.App, opts Options) {
 	updateConfig = opts.Updates
 	runner = newSurface(root, opts)
+	scenes = []*surface{runner}
 	runUIKit(opts)
 }
 
@@ -479,29 +489,36 @@ func runUIKit(opts Options) {
 	uiApplicationMain(1, unsafe.Pointer(&argv[0]), 0, apple.CFString("NsgoAppDelegate"))
 }
 
-// window keeps a standalone app's key window alive; controller is its
-// root view controller.
-var window, controller objc.ID
-
+// sceneWillConnect shows a scene UIKit connects in a surface of its own: the first in runner, which starts the engine; one that connects again after its disconnect (sceneDidDisconnect) in the surface it showed, its tree kept; and a further one, as iPadOS connects for each window the user opens, in a new surface whose tree the engine opens to show the main view (openScene). An app that declares no multiple scenes (UIApplicationSupportsMultipleScenes) has runner alone, which moves to a scene that connects while it shows in another.
 func sceneWillConnect(self objc.ID, _ objc.SEL, scene, session, options objc.ID) {
 	takeConnectionActivities(options)
 	takeConnectionLinks(options)
-	s := runner
+	id := sessionID(session)
+	s := sceneSurface(id)
+	switch {
+	case s != nil:
+	case runner.native == 0 || !multipleScenes() || runner.discarded && runner.window == 0:
+		s = runner
+	default:
+		s = newSurface(runner.app, Options{ID: runner.id, Components: runner.components, Appearance: runner.appearance})
+		scenes = append(scenes, s)
+	}
+	s.session, s.discarded = id, false
 	if s.native != 0 {
 		s.reconnect(scene)
 		return
 	}
-	window = objc.ID(apple.Class("UIWindow")).Send(selAlloc).Send(sel("initWithWindowScene:"), scene)
-	bounds := objc.Send[apple.CGRect](window, selBounds)
-	controller = objc.ID(classController).Send(selNew)
-	s.native = objc.ID(classSurface).Send(selAlloc).Send(selInitWithFrame, bounds)
-	views[s.native] = &view{surface: s}
-	controller.Send(sel("setView:"), s.native)
-	window.Send(sel("setRootViewController:"), controller)
-	setAppearance(s.appearance)
-	window.Send(sel("makeKeyAndVisible"))
+	s.show(scene)
 	s.watch()
 	s.env = s.environment()
+	if s != runner {
+		sceneCount++
+		s.scene = sceneCount
+		if runner.engine != nil {
+			runner.engine.Dispatch(driver.Event{Kind: driver.EventOpenScene, Count: s.scene})
+		}
+		return
+	}
 	if s.app == nil {
 		// A test host's: the test opens its app.
 		close(sceneReady)
@@ -510,37 +527,137 @@ func sceneWillConnect(self objc.ID, _ objc.SEL, scene, session, options objc.ID)
 	s.startEngine(nil)
 }
 
-// sceneDidDisconnect lets go of the window of the scene UIKit releases, as it may a scene in the background while the process lives, and of the display link, which holds the surface view. The engine, its tree, the surface view and its controller stay for the scene that connects next (reconnect); the engine closes only as the app terminates.
-func sceneDidDisconnect(self objc.ID, _ objc.SEL, scene objc.ID) { runner.detach() }
+// sceneCount numbers the scenes beyond the first (surface.scene).
+var sceneCount uint32
 
-// detach takes the surface view out of the standalone app's window and lets the window go.
+// sessionID is a UISceneSession's persistent identifier.
+func sessionID(session objc.ID) string {
+	return apple.GoString(session.Send(sel("persistentIdentifier")))
+}
+
+// sceneSurface is the surface that shows the scene session id, nil for none.
+func sceneSurface(id string) *surface {
+	for _, s := range scenes {
+		if s.session == id && id != "" {
+			return s
+		}
+	}
+	return nil
+}
+
+// multipleScenes reports whether the app declares multiple scenes (UIApplicationSupportsMultipleScenes, apple.multiple_scenes).
+func multipleScenes() bool {
+	return objc.Send[bool](objc.ID(apple.Class("UIApplication")).Send(sel("sharedApplication")), sel("supportsMultipleScenes"))
+}
+
+// controllerSurface is the surface whose root view controller is controller, runner for one it does not know.
+func controllerSurface(controller objc.ID) *surface {
+	for _, s := range scenes {
+		if s.controller == controller {
+			return s
+		}
+	}
+	return runner
+}
+
+// show makes the surface's view, at first, and shows it in a new key window of scene.
+func (s *surface) show(scene objc.ID) {
+	s.window = objc.ID(apple.Class("UIWindow")).Send(selAlloc).Send(sel("initWithWindowScene:"), scene)
+	bounds := objc.Send[apple.CGRect](s.window, selBounds)
+	if s.native == 0 {
+		s.controller = objc.ID(classController).Send(selNew)
+		s.native = objc.ID(classSurface).Send(selAlloc).Send(selInitWithFrame, bounds)
+		views[s.native] = &view{surface: s}
+		s.controller.Send(sel("setView:"), s.native)
+	} else {
+		s.native.Send(selSetFrame, bounds)
+	}
+	s.window.Send(sel("setRootViewController:"), s.controller)
+	s.window.Send(sel("setOverrideUserInterfaceStyle:"), uiStyle(s.appearance))
+	s.window.Send(sel("makeKeyAndVisible"))
+}
+
+// attachScene attaches the surface of the scene cfg names to the tree the engine opened for it (openScene), as macOS attaches a window: at its view's size, in its environment.
+func attachScene(cfg driver.SurfaceConfig) {
+	i := slices.IndexFunc(scenes, func(s *surface) bool { return s.scene == cfg.Scene && s.engine == nil })
+	if i < 0 {
+		return
+	}
+	s := scenes[i]
+	s.tree = cfg.ID
+	s.engine = runner.engine.Attach(cfg.ID, s)
+	if s.discarded {
+		// The system discarded the scene before its tree came.
+		s.engine.Dispatch(driver.Event{Kind: driver.EventWindowEnded})
+		return
+	}
+	bounds := objc.Send[apple.CGRect](s.native, selBounds)
+	size := driver.Size{Width: driver.Points(bounds.Size.Width), Height: driver.Points(bounds.Size.Height)}
+	s.env = s.environment()
+	s.engine.ResizeWithEnvironment(size, s.geometry(size), s.env)
+	s.observe()
+	if s.frameWanted.Load() || s.animator.Running() {
+		s.startTicking()
+	}
+}
+
+// sceneDidDisconnect lets go of the window of the scene UIKit releases, as it may a scene in the background while the process lives, and of the display link, which holds the surface view. The engine, the scene's tree, its surface view and its controller stay for the scene to connect again (reconnect); the engine closes only as the app terminates, and a further scene's tree as the system discards its session (discardScene).
+func sceneDidDisconnect(self objc.ID, _ objc.SEL, scene objc.ID) {
+	if s := sceneSurface(sessionID(scene.Send(sel("session")))); s != nil {
+		s.detach()
+	}
+}
+
+// discardScene follows the system discarding scene session id, as the user closes one of the app's windows: a further scene's tree ends, and runner's waits, windowless, for the next scene that connects, as the engine's own tree outlives the app's windows.
+func discardScene(id string) {
+	s := sceneSurface(id)
+	if s == nil {
+		return
+	}
+	s.detach()
+	s.discarded = true
+	if s != runner && s.engine != nil {
+		s.engine.Dispatch(driver.Event{Kind: driver.EventWindowEnded})
+	}
+}
+
+// endScene lets go of a further scene's surface once the engine destroyed its tree.
+func (s *surface) endScene() {
+	s.detach()
+	s.close()
+	delete(views, s.native)
+	s.controller.Send(selRelease)
+	s.native.Send(selRelease)
+	s.native, s.controller = 0, 0
+	scenes = slices.DeleteFunc(scenes, func(o *surface) bool { return o == s })
+}
+
+// detach takes the surface view out of its scene's window and lets the window go.
 func (s *surface) detach() {
-	if window == 0 {
+	if s.window == 0 {
 		return
 	}
 	s.dropLink()
-	w := window
-	window = 0
+	w := s.window
+	s.window = 0
 	w.Send(selSetHidden, true)
 	w.Send(sel("setRootViewController:"), objc.ID(0))
 	w.Send(selRelease)
 }
 
-// reconnect shows the surface the app already runs on in the window of a scene that connects again after its previous one disconnected (sceneDidDisconnect), rather than starting a second engine over the first. The new window lays the view out at its size, which reaches the engine as a resize with the environment read there; the links and the activity the scene connects with go to the running app.
+// reconnect shows a surface that shows already, or did until its scene disconnected (sceneDidDisconnect), in the window of a scene that connects, rather than starting a second engine or tree over the first. The new window lays the view out at its size, which reaches the engine as a resize with the environment read there; the links and the activity the scene connects with go to the running app.
 func (s *surface) reconnect(scene objc.ID) {
-	// A scene that connects while the window still shows in another moves the app to it.
+	// A single-scene app's scene that connects while the window still shows in another moves the app to it.
 	s.detach()
-	window = objc.ID(apple.Class("UIWindow")).Send(selAlloc).Send(sel("initWithWindowScene:"), scene)
-	s.native.Send(selSetFrame, objc.Send[apple.CGRect](window, selBounds))
-	window.Send(sel("setRootViewController:"), controller)
-	setAppearance(s.appearance)
-	window.Send(sel("makeKeyAndVisible"))
+	s.show(scene)
 	if s.engine == nil {
-		// A test host's before a test opened its app.
+		// A test host's before a test opened its app, or a further scene's before its tree attached.
 		return
 	}
 	s.refresh()
-	s.sendLaunchLinks()
+	if runner.engine != nil {
+		runner.sendLaunchLinks()
+	}
 	if s.perf != nil || s.frameWanted.Load() || s.animator.Running() || len(s.motions) > 0 {
 		s.startTicking()
 	}
@@ -597,6 +714,12 @@ func (s *surface) startEngine(test *testOpen) {
 	apple.SetPurchaseUpdates(e.Dispatch)
 	s.sendLaunchLinks()
 	s.observe()
+	// Scenes that connected before the engine started, as iPadOS restores a test host's, open their trees now.
+	for _, o := range scenes {
+		if o.scene != 0 && o.engine == nil {
+			e.Dispatch(driver.Event{Kind: driver.EventOpenScene, Count: o.scene})
+		}
+	}
 }
 
 // testOpen is what a test host opens the app with: the test's options and
@@ -761,7 +884,7 @@ func (s *surface) uiWindow() objc.ID { return s.native.Send(sel("window")) }
 // a standalone app's own, or the host's nearest above an embedded view.
 func (s *surface) viewController() objc.ID {
 	if !s.embedded {
-		return controller
+		return s.controller
 	}
 	for r := s.native.Send(sel("nextResponder")); r != 0; r = r.Send(sel("nextResponder")) {
 		if objc.Send[bool](r, sel("isKindOfClass:"), apple.Class("UIViewController")) {
@@ -933,8 +1056,33 @@ func (s *surface) Mount(b *driver.MountBatch) {
 func (s *surface) RequestFrame() {
 	s.frameWanted.Store(true)
 	if !s.fullRate.Load() {
-		apple.OnMain(s.startTicking)
+		apple.OnMain(s.frameClock)
 	}
+}
+
+// frameClock starts the clock that serves a frame the engine asked s for: s's own, or, for a standalone app's scene that shows in no foreground window, that of one that does, since the engine asks one of its surfaces for the frames of all their trees.
+func (s *surface) frameClock() {
+	if !s.embedded && !s.foreground() {
+		for _, o := range scenes {
+			if o.foreground() && o.engine != nil {
+				s.frameWanted.Store(false)
+				o.frameWanted.Store(true)
+				o.startTicking()
+				return
+			}
+		}
+	}
+	s.startTicking()
+}
+
+// foreground reports whether the surface shows in the window of a scene in the foreground, whose display link ticks.
+func (s *surface) foreground() bool {
+	const background = 2 // UISceneActivationStateBackground; unattached is -1
+	if s.window == 0 {
+		return false
+	}
+	state := objc.Send[int](s.window.Send(sel("windowScene")), sel("activationState"))
+	return state >= 0 && state < background
 }
 
 func (s *surface) apply(b *driver.MountBatch) {
@@ -1121,7 +1269,19 @@ func (s *surface) apply(b *driver.MountBatch) {
 		case driver.ItemHistory:
 			s.history = int(it.Count)
 			continue
-		case driver.ItemTitle, driver.ItemBackUnhandled, driver.ItemBackPreview, driver.ItemWindow, driver.ItemMenu:
+		case driver.ItemOpenSurface:
+			if it.Surface.Kind == driver.SurfaceScene {
+				attachScene(*it.Surface)
+			}
+			continue
+		case driver.ItemWindow:
+			if it.Window.Action == driver.WindowDestroy && s.scene != 0 {
+				// A further scene's tree ended (discardScene): the batch says no more, and surfaceApply lets the surface go.
+				s.ending = true
+				return
+			}
+			continue
+		case driver.ItemTitle, driver.ItemBackUnhandled, driver.ItemBackPreview, driver.ItemMenu:
 			continue
 		}
 		if int(it.ID) >= len(s.views) || s.views[it.ID] == nil {
@@ -1792,12 +1952,12 @@ func typesKey(presses objc.ID) bool {
 }
 
 // pressSurface is the surface hardware keys pressed in self go to: an
-// embedded view's, or a standalone app's from its controller.
+// embedded view's, or a standalone app's scene's from its controller.
 func pressSurface(self objc.ID) *surface {
 	if v := views[self]; v != nil {
 		return v.surface
 	}
-	return runner
+	return controllerSurface(self)
 }
 
 // pressesEnded stops repeating a held key's binding.
@@ -1884,6 +2044,10 @@ func surfaceApply(self objc.ID, _ objc.SEL, _ objc.ID) {
 		driver.Apply(b, s.apply)
 	}
 	done()
+	if s.ending {
+		s.endScene()
+		return
+	}
 	if s.hud != nil {
 		s.native.Send(sel("bringSubviewToFront:"), s.hud.panel)
 	}

@@ -37,6 +37,7 @@ type host struct{}
 func (host) Main(run func() int) {
 	sceneReady = make(chan struct{})
 	runner = newSurface(nil, Options{ID: "dev.nsgo.test"})
+	scenes = []*surface{runner}
 	// devicectl on an iPhone and simctl in a simulator bridge the app's output but not its exit code: the tool's token marks where this run's output starts and what it exits with, as Android's host marks its log, even when the app ends before simctl attaches to it.
 	token, marked := os.LookupEnv("NSGO_TEST_RUN")
 	if marked {
@@ -166,9 +167,9 @@ const (
 	keyboardUsagePage = 7
 )
 
-// enqueue hands event to UIKit as the window's, then releases it.
-func enqueue(event uintptr) {
-	context := objc.Send[uint32](window, sel("_contextId"))
+// enqueue hands event to UIKit as window w's, then releases it.
+func enqueue(w objc.ID, event uintptr) {
+	context := objc.Send[uint32](w, sel("_contextId"))
 	hidSetSender(event, testSender)
 	bksDigitizerInfo(event, context, 0, 0, 0, 0, 0)
 	objc.ID(apple.Class("UIApplication")).Send(sel("sharedApplication")).Send(sel("_enqueueHIDEvent:"), event)
@@ -183,8 +184,8 @@ const (
 	up
 )
 
-// touch is one finger at p, the window's points, in ph.
-func touch(p driver.Point, ph phase) {
+// touch is one finger at p, window w's points, in ph.
+func touch(w objc.ID, p driver.Point, ph phase) {
 	onMainSync(func() {
 		touching := uint8(0)
 		if ph != up {
@@ -208,15 +209,15 @@ func touch(p driver.Point, ph phase) {
 			hidAppend(hand, finger, 0)
 			apple.Release(finger)
 		}
-		enqueue(hand)
+		enqueue(w, hand)
 	})
 }
 
-// focusAt gives the text field at p the focus: made touches leave the
+// focusAt gives the text field at p in window w the focus: made touches leave the
 // first responder where it was, as UI test tools know.
-func focusAt(p driver.Point) {
+func focusAt(w objc.ID, p driver.Point) {
 	onMainSync(func() {
-		hit := window.Send(sel("hitTest:withEvent:"), apple.CGPoint{X: float64(p.X), Y: float64(p.Y)}, objc.ID(0))
+		hit := w.Send(sel("hitTest:withEvent:"), apple.CGPoint{X: float64(p.X), Y: float64(p.Y)}, objc.ID(0))
 		field, text := objc.ID(apple.Class("UITextField")), objc.ID(apple.Class("UITextView"))
 		for v := hit; v != 0; v = v.Send(sel("superview")) {
 			if objc.Send[bool](v, sel("isKindOfClass:"), field) || objc.Send[bool](v, sel("isKindOfClass:"), text) {
@@ -236,19 +237,19 @@ func (t *testSurface) Press(at driver.Point, hold time.Duration, mods driver.Mod
 		held  bool
 	}{{0xe0, mods.Control}, {0xe1, mods.Shift}, {0xe2, mods.Alt}, {0xe3, mods.Platform}} {
 		if key.held {
-			hidKey(key.usage, true)
+			hidKey(t.s.window, key.usage, true)
 			held = append(held, key.usage)
 		}
 	}
 	defer func() {
 		for i := len(held) - 1; i >= 0; i-- {
-			hidKey(held[i], false)
+			hidKey(t.s.window, held[i], false)
 		}
 	}()
-	touch(at, down)
+	touch(t.s.window, at, down)
 	time.Sleep(max(hold+50*time.Millisecond, 60*time.Millisecond))
-	touch(at, up)
-	focusAt(at)
+	touch(t.s.window, at, up)
+	focusAt(t.s.window, at)
 	return nil
 }
 
@@ -256,41 +257,41 @@ func (t *testSurface) RightClick(driver.Point) error {
 	return errors.New("a phone has no secondary click: use LongPress")
 }
 
-// fingerAlong moves a finger along path, 10 points a frame, then rests
+// fingerAlong moves a finger along path in window w, 10 points a frame, then rests
 // still reporting where it is before it lifts, so it ends without a
 // fling.
-func fingerAlong(path []driver.Point) {
-	touch(path[0], down)
+func fingerAlong(w objc.ID, path []driver.Point) {
+	touch(w, path[0], down)
 	time.Sleep(100 * time.Millisecond)
 	at := path[0]
 	for _, to := range path[1:] {
 		n := int(math.Max(math.Abs(float64(to.X-at.X)), math.Abs(float64(to.Y-at.Y)))/10) + 1
 		for i := 1; i <= n; i++ {
 			f := driver.Points(i) / driver.Points(n)
-			touch(driver.Point{X: at.X + (to.X-at.X)*f, Y: at.Y + (to.Y-at.Y)*f}, move)
+			touch(w, driver.Point{X: at.X + (to.X-at.X)*f, Y: at.Y + (to.Y-at.Y)*f}, move)
 			time.Sleep(16 * time.Millisecond)
 		}
 		at = to
 	}
 	for range 6 {
-		touch(at, move)
+		touch(w, at, move)
 		time.Sleep(16 * time.Millisecond)
 	}
-	touch(at, up)
+	touch(w, at, up)
 }
 
 func (t *testSurface) Drag(path []driver.Point) error {
 	if len(path) == 0 {
 		return errors.New("an empty drag")
 	}
-	fingerAlong(path)
+	fingerAlong(t.s.window, path)
 	return nil
 }
 
 // Scroll drags the content the other way from delta: a finger moving up
 // shows what is below.
 func (t *testSurface) Scroll(at driver.Point, delta driver.Point) error {
-	fingerAlong([]driver.Point{at, {X: at.X - delta.X, Y: at.Y - delta.Y}})
+	fingerAlong(t.s.window, []driver.Point{at, {X: at.X - delta.X, Y: at.Y - delta.Y}})
 	return nil
 }
 
@@ -331,7 +332,7 @@ func (t *testSurface) Type(text string) error {
 				kb.Send(sel("addInputString:"), apple.NSString(string(r)))
 				return
 			}
-			if f := window.Send(sel("firstResponder")); f != 0 {
+			if f := t.s.window.Send(sel("firstResponder")); f != 0 {
 				f.Send(sel("insertText:"), apple.NSString(string(r)))
 			}
 		})
@@ -345,7 +346,7 @@ func (t *testSurface) Type(text string) error {
 func (t *testSurface) Compose(text string) error {
 	var err error
 	onMainSync(func() {
-		f := window.Send(sel("firstResponder"))
+		f := t.s.window.Send(sel("firstResponder"))
 		if f == 0 || !objc.Send[bool](f, sel("respondsToSelector:"), sel("setMarkedText:selectedRange:")) {
 			err = errors.New("no text input has the keyboard")
 			return
@@ -365,7 +366,7 @@ func (t *testSurface) Compose(text string) error {
 func (t *testSurface) Commit(text string) error {
 	var err error
 	onMainSync(func() {
-		f := window.Send(sel("firstResponder"))
+		f := t.s.window.Send(sel("firstResponder"))
 		if f == 0 || !objc.Send[bool](f, sel("respondsToSelector:"), sel("unmarkText")) {
 			err = errors.New("no text input has the keyboard")
 			return
@@ -402,14 +403,14 @@ func keyUsage(name string) (uint32, bool) {
 	return 0, false
 }
 
-func hidKey(usage uint32, isDown bool) {
+func hidKey(w objc.ID, usage uint32, isDown bool) {
 	onMainSync(func() {
 		d := uint8(0)
 		if isDown {
 			d = 1
 		}
 		if ev := hidKeyboard(0, machAbsoluteTime(), keyboardUsagePage, usage, d, 0); ev != 0 {
-			enqueue(ev)
+			enqueue(w, ev)
 		}
 	})
 	time.Sleep(10 * time.Millisecond)
@@ -423,7 +424,7 @@ func (t *testSurface) Key(key string) error {
 	switch name {
 	case "mod+a":
 		onMainSync(func() {
-			if f := window.Send(sel("firstResponder")); f != 0 {
+			if f := t.s.window.Send(sel("firstResponder")); f != 0 {
 				f.Send(sel("selectAll:"), objc.ID(0))
 			}
 		})
@@ -431,7 +432,7 @@ func (t *testSurface) Key(key string) error {
 	case "backspace":
 		var done bool
 		onMainSync(func() {
-			if kb := keyboardImpl(); kb != 0 && window.Send(sel("firstResponder")) != 0 {
+			if kb := keyboardImpl(); kb != 0 && t.s.window.Send(sel("firstResponder")) != 0 {
 				kb.Send(sel("deleteFromInput"))
 				done = true
 			}
@@ -447,7 +448,7 @@ func (t *testSurface) Key(key string) error {
 			if onTV() && !t.s.editing() {
 				return
 			}
-			if kb := keyboardImpl(); kb != 0 && window.Send(sel("firstResponder")) != 0 {
+			if kb := keyboardImpl(); kb != 0 && t.s.window.Send(sel("firstResponder")) != 0 {
 				kb.Send(sel("addInputString:"), apple.NSString("\n"))
 				done = true
 			}
@@ -466,10 +467,10 @@ func (t *testSurface) Key(key string) error {
 		codes = append(codes, u)
 	}
 	for _, u := range codes {
-		hidKey(u, true)
+		hidKey(t.s.window, u, true)
 	}
 	for i := len(codes) - 1; i >= 0; i-- {
-		hidKey(codes[i], false)
+		hidKey(t.s.window, codes[i], false)
 	}
 	return nil
 }
@@ -541,10 +542,10 @@ func findLabel(v objc.ID, text string) objc.ID {
 func (t *testSurface) Screenshot() ([]byte, error) {
 	var png []byte
 	onMainSync(func() {
-		bounds := objc.Send[apple.CGRect](window, selBounds)
+		bounds := objc.Send[apple.CGRect](t.s.window, selBounds)
 		renderer := objc.ID(apple.Class("UIGraphicsImageRenderer")).Send(selAlloc).Send(sel("initWithBounds:"), bounds)
 		draw := objcblock.New(func(_ objc.Block, _ objc.ID) {
-			objc.Send[bool](window, sel("drawViewHierarchyInRect:afterScreenUpdates:"), bounds, true)
+			objc.Send[bool](t.s.window, sel("drawViewHierarchyInRect:afterScreenUpdates:"), bounds, true)
 		})
 		data := renderer.Send(sel("PNGDataWithActions:"), draw)
 		draw.Release()
@@ -566,7 +567,7 @@ func (t *testSurface) Sync() { t.s.engine.Sync() }
 func (t *testSurface) Animating() bool {
 	var busy bool
 	onMainSync(func() {
-		busy = t.s.animator.Ending() || layersAnimating(window.Send(sel("layer"))) || gliding(window)
+		busy = t.s.animator.Ending() || layersAnimating(t.s.window.Send(sel("layer"))) || gliding(t.s.window)
 	})
 	return busy
 }

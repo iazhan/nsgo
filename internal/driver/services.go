@@ -197,6 +197,8 @@ const (
 	// Accessible. The platform reports the frame it applied in its
 	// environment's WindowFrame, and ends it with EventWindowEnded.
 	SurfaceOverlay
+	// SurfaceScene is a scene the platform connected beyond the app's first, as iPadOS connects one for each window the user opens (EventOpenScene): it shows the app's main view, and the platform ends it with EventWindowEnded as the system discards the scene.
+	SurfaceScene
 )
 
 // SurfaceConfig is a window, a panel or a tray icon's view the app opens
@@ -236,6 +238,8 @@ type SurfaceConfig struct {
 	SkipTaskbar bool
 	// Tray is the tray icon a SurfaceTrayIcon draws.
 	Tray uint32
+	// Scene is the platform's number for the scene a SurfaceScene shows in, EventOpenScene's Count.
+	Scene uint32
 	// Workspaces are the workspaces a window shows on (WindowSetWorkspaces).
 	Workspaces WindowWorkspaces
 	// Main is set for the main window, which SetMainView opens: the window a test host's model follows.

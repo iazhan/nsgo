@@ -407,13 +407,14 @@ func (s *surface) saveFile(r driver.SaveRequest, id uint32) {
 	s.presentDocuments(picker, documentRequest{id: id, staged: filepath.Dir(path)})
 }
 
-// setAppearance shows the window, and the system views in it, in a, or
-// in the system's appearance.
+// setAppearance shows a standalone app's windows, one a scene, and the system views in them, in a, or in the system's appearance: the app forces one for all its scenes.
 func setAppearance(a driver.Appearance) {
-	if window == 0 {
-		return
+	for _, s := range scenes {
+		s.appearance = a
+		if s.window != 0 {
+			s.window.Send(sel("setOverrideUserInterfaceStyle:"), uiStyle(a))
+		}
 	}
-	window.Send(sel("setOverrideUserInterfaceStyle:"), uiStyle(a))
 }
 
 // uiStyle is UIKit's interface style of a, unspecified for the system's.
