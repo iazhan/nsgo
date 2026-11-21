@@ -305,3 +305,44 @@ func TestMeasuredTextCountsTrailingWhiteSpace(t *testing.T) {
 		t.Errorf("an empty text's line = %v, want the font's 12", m.LineHeight)
 	}
 }
+
+// countingEngine counts the texts a drawing prepares.
+type countingEngine struct{ prepares int }
+
+func (e *countingEngine) Prepare(t *AttributedText) PreparedText {
+	e.prepares++
+	return hangingText{t.Text}
+}
+
+// TestMeasurementPreparesTextOnce holds a measurement to one preparation of
+// the text it measures: the metrics and the width are both the first line's,
+// so reading the width again would lay the text out a second time, which each
+// backend pays for in full, and Windows in a DirectWrite layout.
+func TestMeasurementPreparesTextOnce(t *testing.T) {
+	e := &countingEngine{}
+	d := NewDrawing(e)
+	font := Font{Size: 10}
+
+	if w := d.MeasureText("ab", font); w != 12 {
+		t.Fatalf("width of %q = %v, want 12", "ab", w)
+	}
+	if e.prepares != 1 {
+		t.Errorf("measuring one text prepared it %d times, want 1", e.prepares)
+	}
+
+	// A text ending in white space is measured with a mark after it, and the
+	// mark itself only the first time: it is the same in every such text.
+	e.prepares = 0
+	if w := d.MeasureText("cd ", font); w != 18 {
+		t.Fatalf("width of %q = %v, want 18", "cd ", w)
+	}
+	first := e.prepares
+	e.prepares = 0
+	if w := d.MeasureText("ef ", font); w != 18 {
+		t.Fatalf("width of %q = %v, want 18", "ef ", w)
+	}
+	if e.prepares >= first {
+		t.Errorf("a second text ending in white space prepared %d texts, the first %d: the mark is measured again",
+			e.prepares, first)
+	}
+}

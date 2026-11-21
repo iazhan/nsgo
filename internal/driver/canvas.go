@@ -32,6 +32,7 @@ type Drawing struct {
 
 	text     TextEngine // measures text; nil approximates it
 	measured map[textKey]TextMetrics
+	marks    map[Font]float32 // widthMark's width, by font
 	track    *drawTrack
 	// pathAside is set while the current path is only the track's,
 	// after a FillPath, StrokePath or ClipPath (restorePath).
@@ -847,7 +848,7 @@ func (d *Drawing) TextMetrics(text string, font Font) TextMetrics {
 		line := d.firstLine(cmp.Or(text, " "), font)
 		m.Ascent, m.Descent, m.LineHeight = float32(line.Ascender), float32(line.Descender),
 			float32(line.Bounds.Size.Height)
-		m.Width = d.advance(text, font)
+		m.Width = d.advanceLine(text, font, line)
 	}
 	if d.measured == nil {
 		d.measured = map[textKey]TextMetrics{}
@@ -859,20 +860,40 @@ func (d *Drawing) TextMetrics(text string, font Font) TextMetrics {
 // widthMark closes a text ending in white space while it is measured.
 const widthMark = "x"
 
-// advance returns how far text advances on its first line in font, its
-// trailing white space included. Engines lay a line out without the white
-// space at its end, which hangs past the line as in CSS, so a text ending
-// in it is measured with a mark after it, less the mark.
-func (d *Drawing) advance(text string, font Font) float32 {
+// advanceLine returns how far text advances on its first line in font, its
+// trailing white space included, taking the width of line, which firstLine
+// laid out for the same text. Measuring the text again to read its width
+// would lay it out a second time, which on Windows builds another DirectWrite
+// layout for every measurement.
+//
+// Engines lay a line out without the white space at its end, which hangs past
+// the line as in CSS, so a text ending in it is measured with a mark after it,
+// less the mark.
+func (d *Drawing) advanceLine(text string, font Font, line TextLine) float32 {
 	if text == "" {
 		return 0
 	}
 	last, _ := utf8.DecodeLastRuneInString(text)
 	if !unicode.IsSpace(last) || lineBreak(last) {
-		return float32(d.firstLine(text, font).Bounds.Size.Width)
+		return float32(line.Bounds.Size.Width)
 	}
-	w := d.firstLine(text+widthMark, font).Bounds.Size.Width - d.firstLine(widthMark, font).Bounds.Size.Width
-	return float32(max(w, 0))
+	w := float32(d.firstLine(text+widthMark, font).Bounds.Size.Width) - d.markWidth(font)
+	return max(w, 0)
+}
+
+// markWidth returns how wide widthMark is in font. Every text ending in white
+// space needs it, and it does not change while the drawing lives, so it is
+// measured once per font rather than once per such text.
+func (d *Drawing) markWidth(font Font) float32 {
+	if w, ok := d.marks[font]; ok {
+		return w
+	}
+	w := float32(d.firstLine(widthMark, font).Bounds.Size.Width)
+	if d.marks == nil {
+		d.marks = map[Font]float32{}
+	}
+	d.marks[font] = w
+	return w
 }
 
 // lineBreak says whether r is one of Unicode's mandatory line breaks.
