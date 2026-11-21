@@ -80,7 +80,8 @@ func TestNativeDepthThrowsARangeError(t *testing.T) {
 			t.Parallel()
 			start := time.Now()
 			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestNativeDepthThrowsARangeError$", "-test.v")
-			cmd.Env = append(os.Environ(), "NSGO_TEST_NATIVE_DEPTH_CASE="+name)
+			// The bound chain holds about 700 MB live, and with GOGC alone its heap goal is twice that, which a collector slowed by the other cases running in parallel overshoots past 2 GiB. A soft limit of 1 GiB keeps the collector ahead of it, while a chain that grows quadratically still passes 2 GiB in live memory.
+			cmd.Env = append(os.Environ(), "NSGO_TEST_NATIVE_DEPTH_CASE="+name, "GOMEMLIMIT=1GiB")
 			cmd.WaitDelay = time.Second
 			timer := time.AfterFunc(2*time.Minute, func() { _ = cmd.Process.Kill() })
 			defer timer.Stop()
