@@ -69,7 +69,7 @@ var unsupportedEvents = map[string]string{
 		EventWindowEnded`,
 	"system and desktop": `EventTray EventHotKey EventLaunchAtLogin EventSpeech
 		EventQuitRequest EventDockMenu EventHotKeyState EventWindowPlacementFailed`,
-	"Apple only": `EventSignInWithApple`,
+	"Apple only": `EventSignInWithApple EventOpenScene`,
 	// Services main added after this target, which no HarmonyOS kit answers here yet.
 	"services added since": `EventAuthSession EventOpenLinks EventPurchase
 		EventPurchaseUpdate EventSensor EventSpeak EventWebCookies`,
